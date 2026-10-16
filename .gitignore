@@ -39,7 +39,9 @@ logs/
 # Test artifacts
 coverage/
 __snapshots__/
+**/__snapshots__/
 *.snap
+*.env.local
 junit.xml
 test-results/
 .nyc_output/

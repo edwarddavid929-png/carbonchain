@@ -96,6 +96,24 @@ export class CreditsController {
     return this.creditsService.listCreditsByProject(projectId);
   }
 
+  @ApiOperation({
+    summary: 'List credits by project (paginated)',
+    description:
+      'Returns a paginated list of credit IDs from the off-chain index. offset is zero-based; limit is capped at 100.',
+  })
+  @Get('project/:projectId/paginated')
+  async listByProjectPaginated(
+    @Param('projectId') projectId: string,
+    @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ): Promise<{ creditIds: string[]; total: number; offset: number; limit: number }> {
+    return this.creditsService.listCreditsByProjectPaginated(
+      projectId,
+      offset,
+      limit,
+    );
+  }
+
   @ApiOperation({ summary: 'Transfer a credit to another address' })
   @UseGuards(JwtAuthGuard)
   @Post(':id/transfer')
@@ -116,5 +134,24 @@ export class CreditsController {
     @Request() req: any,
   ): Promise<{ childCredit1: string; childCredit2: string }> {
     return this.creditsService.splitCredit(creditId, dto.splitTonnes, req.user.account);
+  }
+
+  @ApiOperation({
+    summary: 'Merge multiple Active credits into one',
+    description:
+      'Merges 2+ Active credits with matching project/vintage/methodology/geography. ' +
+      'Caller must own all credits. Source credits are retired; a new merged credit is returned.',
+  })
+  @UseGuards(JwtAuthGuard)
+  @Post('merge')
+  async mergeCredits(
+    @Body() dto: { creditIds: string[] },
+    @Request() req: any,
+  ): Promise<{
+    mergedCreditId: string;
+    mergedTonnes: string;
+    sourceCreditIds: string[];
+  }> {
+    return this.creditsService.mergeCredits(dto.creditIds, req.user.account);
   }
 }

@@ -1,4 +1,10 @@
-import { IsString, IsNotEmpty, IsNumberString } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsNumberString,
+  MinLength,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RetireDto {
@@ -22,6 +28,7 @@ export class RetireDto {
 
   @ApiProperty({ example: '2024 Scope 3 offset' })
   @IsString()
-  @IsNotEmpty()
+  @MinLength(1, { message: 'reason must be between 1 and 500 characters' })
+  @MaxLength(500, { message: 'reason must be between 1 and 500 characters' })
   reason: string;
 }

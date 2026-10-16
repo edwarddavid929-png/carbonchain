@@ -392,6 +392,148 @@ export class CreditsService {
     }
   }
 
+  /**
+   * Return a paginated list of credit IDs for a given project from the
+   * off-chain repository.  Offset is zero-based; limit is capped at 100.
+   */
+  async listCreditsByProjectPaginated(
+    projectId: string,
+    offset: number,
+    limit: number,
+  ): Promise<{ creditIds: string[]; total: number; offset: number; limit: number }> {
+    const effectiveOffset = Math.max(0, offset);
+    const effectiveLimit = Math.min(100, Math.max(1, limit));
+
+    // Convert offset/limit to 1-based page for the repository
+    // We use page size = effectiveLimit and derive the page number.
+    // To support arbitrary offset we fetch enough records.
+    try {
+      const result = await this.creditRepo.findByProject(
+        projectId,
+        1,
+        1_000_000, // fetch all for this project so we can slice by offset
+      );
+      const allIds = result.data.map((e) => e.id);
+      const total = allIds.length;
+      const creditIds = allIds.slice(effectiveOffset, effectiveOffset + effectiveLimit);
+
+      return { creditIds, total, offset: effectiveOffset, limit: effectiveLimit };
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to list paginated credits for project ${projectId}: ${(error as Error).message}`,
+      );
+      return { creditIds: [], total: 0, offset: effectiveOffset, limit: effectiveLimit };
+    }
+  }
+
+  /**
+   * Merge two or more Active credits with matching project/vintage/methodology/geography
+   * into a single new credit.  Source credits are marked Retired.
+   * All creditIds must be owned by `callerPublicKey`.
+   */
+  async mergeCredits(
+    creditIds: string[],
+    callerPublicKey: string,
+  ): Promise<{
+    mergedCreditId: string;
+    mergedTonnes: string;
+    sourceCreditIds: string[];
+  }> {
+    if (!creditIds || creditIds.length < 2) {
+      throw new BadRequestException('At least 2 credit IDs are required to merge');
+    }
+
+    // Load all credits
+    const credits: CreditEntity[] = [];
+    for (const id of creditIds) {
+      const entity = await this.creditRepo.findById(id);
+      if (!entity) {
+        throw new BadRequestException(`Credit ${id} not found`);
+      }
+      credits.push(entity);
+    }
+
+    // Validate ownership
+    for (const credit of credits) {
+      if (credit.issuer !== callerPublicKey) {
+        throw new BadRequestException(
+          `Caller is not the owner of credit ${credit.id}`,
+        );
+      }
+    }
+
+    // Validate all are Active
+    for (const credit of credits) {
+      if (credit.status !== CreditStatus.Active) {
+        throw new BadRequestException(
+          `Credit ${credit.id} is not Active (status: ${credit.status})`,
+        );
+      }
+    }
+
+    // Validate same project, vintage, methodology, geography
+    const [first] = credits;
+    for (const credit of credits.slice(1)) {
+      if (credit.projectId !== first.projectId) {
+        throw new BadRequestException(
+          `Credits must belong to the same project`,
+        );
+      }
+      if (credit.vintageYear !== first.vintageYear) {
+        throw new BadRequestException(
+          `Credits must have the same vintage year`,
+        );
+      }
+      if (credit.methodology !== first.methodology) {
+        throw new BadRequestException(
+          `Credits must have the same methodology`,
+        );
+      }
+      if (credit.geography !== first.geography) {
+        throw new BadRequestException(
+          `Credits must have the same geography`,
+        );
+      }
+    }
+
+    // Sum tonnes
+    const totalTonnes = credits
+      .reduce((acc, c) => acc + BigInt(c.tonnes), 0n)
+      .toString();
+
+    // Mark source credits as Retired
+    for (const credit of credits) {
+      credit.status = CreditStatus.Retired;
+      await this.creditRepo.save(credit);
+      await this.invalidateCreditCache(credit.id);
+    }
+
+    // Create merged credit entity
+    const mergedId = `merged-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const merged = new CreditEntity();
+    merged.id = mergedId;
+    merged.projectId = first.projectId;
+    merged.issuer = callerPublicKey;
+    merged.vintageYear = first.vintageYear;
+    merged.methodology = first.methodology;
+    merged.geography = first.geography;
+    merged.tonnes = totalTonnes;
+    merged.ipfsHash = first.ipfsHash;
+    merged.status = CreditStatus.Active;
+    merged.issuedAt = Math.floor(Date.now() / 1000);
+    await this.creditRepo.save(merged);
+
+    this.logger.log(
+      `Merged ${creditIds.length} credits into ${mergedId} (${totalTonnes} units)`,
+    );
+
+    return {
+      mergedCreditId: mergedId,
+      mergedTonnes: totalTonnes,
+      sourceCreditIds: creditIds,
+    };
+  }
+
   private parseEventType(event: any): string {
     const topics = event.topic || [];
     if (topics.length > 0) {

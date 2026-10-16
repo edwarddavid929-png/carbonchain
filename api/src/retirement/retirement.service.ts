@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { StellarService } from '../stellar/stellar.service';
 import { StellarKeypairService } from '../stellar/stellar-keypair.service';
 import { nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
+import { IsString, IsNotEmpty, IsNumberString, MinLength, MaxLength, IsArray } from 'class-validator';
 import { RetirementRecord } from '../shared';
 import { RetirementEntity } from './retirement.entity';
 import type { IRetirementRepository } from './retirement.repository';
@@ -12,16 +13,38 @@ import { PageResult } from '../credits/credit.repository';
 export const MAX_BATCH_SIZE = 20;
 
 export class RetireDto {
+  @IsString()
+  @IsNotEmpty()
   buyerPublicKey: string;
+
+  @IsString()
+  @IsNotEmpty()
   creditId: string;
+
+  @IsNumberString()
+  @IsNotEmpty()
   tonnes: string;
+
+  @IsString()
+  @MinLength(1, { message: 'reason must be between 1 and 500 characters' })
+  @MaxLength(500, { message: 'reason must be between 1 and 500 characters' })
   reason: string;
 }
 
 export class BatchRetireDto {
+  @IsString()
+  @IsNotEmpty()
   buyerPublicKey: string;
+
+  @IsArray()
   creditIds: string[];
+
+  @IsArray()
   tonnes: string[];
+
+  @IsString()
+  @MinLength(1, { message: 'reason must be between 1 and 500 characters' })
+  @MaxLength(500, { message: 'reason must be between 1 and 500 characters' })
   reason: string;
 }
 
